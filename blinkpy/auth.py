@@ -146,6 +146,8 @@ class Auth:
 
     async def refresh_tokens(self, refresh=False):
         """Create or refresh access token."""
+        if refresh and self.refresh_token:
+            return await self._oauth_refresh_tokens()
         self.is_errored = True
         try:
             _LOGGER.info(
@@ -168,6 +170,29 @@ class Auth:
         except (TypeError, KeyError) as error:
             _LOGGER.error("Malformed login response: %s", self.login_response)
             raise TokenRefreshFailed from error
+        return True
+
+    async def _oauth_refresh_tokens(self):
+        """Renew the access token with the OAuth v2 refresh grant.
+
+        Refresh tokens from the OAuth v2 login flow are bound to the v2
+        client and hardware_id, so the legacy request_login refresh is
+        rejected for them. Use the same grant as startup().
+        """
+        self.is_errored = True
+        _LOGGER.info("Refreshing authentication token.")
+        try:
+            token_data = await api.oauth_refresh_token(
+                self, self.refresh_token, self.hardware_id
+            )
+        except (ClientConnectionError, TimeoutError) as error:
+            _LOGGER.error("Token refresh request failed: %s", error)
+            raise TokenRefreshFailed from error
+        if not token_data:
+            _LOGGER.error("Token refresh rejected by the OAuth endpoint.")
+            raise TokenRefreshFailed
+        await self._process_token_data(token_data)
+        self.is_errored = False
         return True
 
     def extract_login_info(self):
